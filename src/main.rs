@@ -1,7 +1,6 @@
 use lyon::geom::LineSegment;
-use lyon::path::builder::*;
 use lyon::path::math::{point, Point};
-use lyon::path::{Event, Path, PathEvent};
+use lyon::path::{Path, PathEvent};
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
@@ -268,34 +267,37 @@ impl FlattenedEventIterator {
         self.remaining_distance = self.line_length;
     }
 
+    fn inner_line_loop(&mut self) -> DashOrGap {
+        let action = self.cursor.progress_by(self.remaining_distance);
+        let previous_relative_distance = self.current_relative_distance;
+        let next_relative_distance = self.current_relative_distance + action.length;
+        self.remaining_distance = action.remaining_distance;
+        self.current_relative_distance = next_relative_distance;
+        match action.dash_action_type {
+            DashActionType::Dash => {
+                let segment = self.line.split_range(std::ops::Range {
+                    start: previous_relative_distance / self.line_length,
+                    end: next_relative_distance / self.line_length,
+                });
+                return DashOrGap::Dash {
+                    from: segment.from,
+                    to: segment.to,
+                    distance: segment.length(),
+                };
+            }
+            DashActionType::Gap => {
+                return DashOrGap::Gap {
+                    distance: action.length,
+                }
+            }
+        }
+    }
+
     fn handle_line(&mut self, line: &LineSegment<f32>) {
         self.initialize_line_loop(line);
         while self.remaining_distance > 0.0f32 {
-            let action = self.cursor.progress_by(self.remaining_distance);
-            let previous_relative_distance = self.current_relative_distance;
-            let next_relative_distance = self.current_relative_distance + action.length;
-            self.remaining_distance = action.remaining_distance;
-            self.current_relative_distance = next_relative_distance;
-            match action.dash_action_type {
-                DashActionType::Dash => {
-                    let segment = self.line.split_range(std::ops::Range {
-                        start: previous_relative_distance / self.line_length,
-                        end: next_relative_distance / self.line_length,
-                    });
-                    let output = DashOrGap::Dash {
-                        from: segment.from,
-                        to: segment.to,
-                        distance: segment.length(),
-                    };
-                    println!("Yield {:?}", output);
-                }
-                DashActionType::Gap => {
-                    let output = DashOrGap::Gap {
-                        distance: action.length,
-                    };
-                    println!("Yield {:?}", output);
-                }
-            }
+            let output = self.inner_line_loop();
+            println!("Yield {:?}", output);
         }
     }
 
