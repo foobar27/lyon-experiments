@@ -233,28 +233,48 @@ enum DashOrGap {
 
 struct FlattenedEventIterator {
     cursor: DashCursor,
+    line: LineSegment<f32>,
+    line_length: f32,
+    current_relative_distance: f32,
+    remaining_distance: f32,
 }
+
+// impl Iterator for FlattenedEventIterator {
+//     type Item = DashOrGap;
+//     fn next(&mut self) -> Option<Self::Item> {
+
+//     }
+// }
 
 impl FlattenedEventIterator {
     pub fn new(options: &DashOptions) -> Self {
         FlattenedEventIterator {
             cursor: DashCursor::new(&options),
+            line: LineSegment {
+                from: Point::zero(),
+                to: Point::zero(),
+            },
+            line_length: 0.0,
+            current_relative_distance: 0.0,
+            remaining_distance: 0.0,
         }
     }
 
-    fn handle_line(&mut self, from: Point, to: Point) {
-        let line = LineSegment { from, to };
-        let mut current_relative_distance = 0.0f32;
-        let line_length = line.length();
-        let mut remaining_distance = line_length;
-        while remaining_distance > 0.0f32 {
-            let action = self.cursor.progress_by(remaining_distance);
-            let next_relative_distance = current_relative_distance + action.length;
+    fn handle_line(&mut self, _line: &LineSegment<f32>) {
+        // TODO rename _line => line
+        self.line = *_line;
+        self.line_length = _line.length();
+
+        self.current_relative_distance = 0.0f32;
+        self.remaining_distance = self.line_length;
+        while self.remaining_distance > 0.0f32 {
+            let action = self.cursor.progress_by(self.remaining_distance);
+            let next_relative_distance = self.current_relative_distance + action.length;
             match action.dash_action_type {
                 DashActionType::Dash => {
-                    let segment = line.split_range(std::ops::Range {
-                        start: current_relative_distance / line_length,
-                        end: next_relative_distance / line_length,
+                    let segment = self.line.split_range(std::ops::Range {
+                        start: self.current_relative_distance / self.line_length,
+                        end: next_relative_distance / self.line_length,
                     });
                     let output = DashOrGap::Dash {
                         from: segment.from,
@@ -270,8 +290,8 @@ impl FlattenedEventIterator {
                     println!("Yield {:?}", output);
                 }
             }
-            remaining_distance = action.remaining_distance;
-            current_relative_distance = next_relative_distance;
+            self.remaining_distance = action.remaining_distance;
+            self.current_relative_distance = next_relative_distance;
         }
     }
 
@@ -281,14 +301,17 @@ impl FlattenedEventIterator {
                 self.cursor.reset();
             }
             PathEvent::Line { from, to } => {
-                self.handle_line(from, to);
+                self.handle_line(&LineSegment { from, to });
             }
             PathEvent::End {
                 last,
                 first,
                 close: true,
             } => {
-                self.handle_line(last, first);
+                self.handle_line(&LineSegment {
+                    from: last,
+                    to: first,
+                });
             }
             PathEvent::Quadratic { .. } => {
                 // TODO auto-flatten?
