@@ -260,10 +260,9 @@ impl FlattenedEventIterator {
         }
     }
 
-    fn handle_line(&mut self, _line: &LineSegment<f32>) {
-        // TODO rename _line => line
-        self.line = *_line;
-        self.line_length = _line.length();
+    fn handle_line(&mut self, line: &LineSegment<f32>) {
+        self.line = *line;
+        self.line_length = line.length();
 
         self.current_relative_distance = 0.0f32;
         self.remaining_distance = self.line_length;
