@@ -260,19 +260,26 @@ impl FlattenedEventIterator {
         }
     }
 
-    fn handle_line(&mut self, line: &LineSegment<f32>) {
+    fn initialize_line_loop(&mut self, line: &LineSegment<f32>) {
         self.line = *line;
         self.line_length = line.length();
 
         self.current_relative_distance = 0.0f32;
         self.remaining_distance = self.line_length;
+    }
+
+    fn handle_line(&mut self, line: &LineSegment<f32>) {
+        self.initialize_line_loop(line);
         while self.remaining_distance > 0.0f32 {
             let action = self.cursor.progress_by(self.remaining_distance);
+            let previous_relative_distance = self.current_relative_distance;
             let next_relative_distance = self.current_relative_distance + action.length;
+            self.remaining_distance = action.remaining_distance;
+            self.current_relative_distance = next_relative_distance;
             match action.dash_action_type {
                 DashActionType::Dash => {
                     let segment = self.line.split_range(std::ops::Range {
-                        start: self.current_relative_distance / self.line_length,
+                        start: previous_relative_distance / self.line_length,
                         end: next_relative_distance / self.line_length,
                     });
                     let output = DashOrGap::Dash {
@@ -289,8 +296,6 @@ impl FlattenedEventIterator {
                     println!("Yield {:?}", output);
                 }
             }
-            self.remaining_distance = action.remaining_distance;
-            self.current_relative_distance = next_relative_distance;
         }
     }
 
