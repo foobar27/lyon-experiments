@@ -1,6 +1,8 @@
+use lyon::geom::euclid::Size2D;
 use lyon::geom::LineSegment;
 use lyon::path::math::{point, Point};
-use lyon::path::{Path, PathEvent};
+use lyon::path::traits::PathBuilder;
+use lyon::path::{Path, PathEvent, Winding};
 
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serialization", derive(Serialize, Deserialize))]
@@ -130,91 +132,97 @@ impl DashCursor {
         }
     }
 }
-// TODO Clean up assert_approx_eq (maybe across lyon?)
-fn assert_approx_eq(a: f32, b: f32, epsilon: f32) {
-    if f32::abs(a - b) > epsilon {
-        println!("{:?} != {:?}", a, b);
-    }
-    assert!((a - b).abs() <= epsilon);
-}
 
-fn assert_slice_approx_eq(a: &[f32], b: &[f32], epsilon: f32) {
-    for i in 0..a.len() {
-        if f32::abs(a[i] - b[i]) > epsilon {
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // TODO Clean up assert_approx_eq (maybe across lyon?)
+    fn assert_approx_eq(a: f32, b: f32, epsilon: f32) {
+        if f32::abs(a - b) > epsilon {
             println!("{:?} != {:?}", a, b);
         }
-        assert!((a[i] - b[i]).abs() <= epsilon);
+        assert!((a - b).abs() <= epsilon);
     }
-    assert_eq!(a.len(), b.len());
-}
 
-#[test]
-fn test_cursor_construction() {
-    for factor in vec![1.0f32, 0.01f32] {
-        for phase in vec![-2, -1, 1, 2] {
-            let options = DashOptions::new(
-                0.05 - (phase as f32) * factor * 16.0,
-                vec![factor * 10.0, factor * 1.0, factor * 2.0, factor * 3.0],
-            );
-            let cursor = DashCursor::new(&options);
-            assert_slice_approx_eq(
-                &vec![
-                    factor * 10.0f32,
-                    factor * 11.0f32,
-                    factor * 13.0f32,
-                    factor * 16.0f32,
-                ],
-                &cursor.cumulative_array,
-                f32::EPSILON,
-            );
-            assert_approx_eq(0.05, cursor.current_offset, 0.000000001);
-            assert_eq!(0, cursor.current_index);
+    fn assert_slice_approx_eq(a: &[f32], b: &[f32], epsilon: f32) {
+        for i in 0..a.len() {
+            if f32::abs(a[i] - b[i]) > epsilon {
+                println!("{:?} != {:?}", a, b);
+            }
+            assert!((a[i] - b[i]).abs() <= epsilon);
+        }
+        assert_eq!(a.len(), b.len());
+    }
+
+    #[test]
+    fn test_cursor_construction() {
+        for factor in vec![1.0f32, 0.01f32] {
+            for phase in vec![-2, -1, 1, 2] {
+                let options = DashOptions::new(
+                    0.05 - (phase as f32) * factor * 16.0,
+                    vec![factor * 10.0, factor * 1.0, factor * 2.0, factor * 3.0],
+                );
+                let cursor = DashCursor::new(&options);
+                assert_slice_approx_eq(
+                    &vec![
+                        factor * 10.0f32,
+                        factor * 11.0f32,
+                        factor * 13.0f32,
+                        factor * 16.0f32,
+                    ],
+                    &cursor.cumulative_array,
+                    f32::EPSILON,
+                );
+                assert_approx_eq(0.05, cursor.current_offset, 0.000000001);
+                assert_eq!(0, cursor.current_index);
+            }
         }
     }
-}
 
-fn assert_action_eq(expected_action: &DashAction, action: &DashAction) {
-    assert_approx_eq(expected_action.length, action.length, 0.000000001);
-    assert_approx_eq(
-        expected_action.remaining_distance,
-        action.remaining_distance,
-        0.001,
-    );
-    assert_eq!(expected_action.dash_action_type, action.dash_action_type);
-}
-
-fn make_dash(length: f32, remaining_distance: f32) -> DashAction {
-    DashAction {
-        length: length,
-        remaining_distance: remaining_distance,
-        dash_action_type: DashActionType::Dash,
+    fn assert_action_eq(expected_action: &DashAction, action: &DashAction) {
+        assert_approx_eq(expected_action.length, action.length, 0.000000001);
+        assert_approx_eq(
+            expected_action.remaining_distance,
+            action.remaining_distance,
+            0.001,
+        );
+        assert_eq!(expected_action.dash_action_type, action.dash_action_type);
     }
-}
 
-fn make_gap(length: f32, remaining_distance: f32) -> DashAction {
-    DashAction {
-        length: length,
-        remaining_distance: remaining_distance,
-        dash_action_type: DashActionType::Gap,
+    fn make_dash(length: f32, remaining_distance: f32) -> DashAction {
+        DashAction {
+            length: length,
+            remaining_distance: remaining_distance,
+            dash_action_type: DashActionType::Dash,
+        }
     }
-}
 
-#[test]
-fn test_no_segment_cross() {
-    let options = DashOptions::new(0.0, vec![1.0, 2.0]);
-    let mut cursor = DashCursor::new(&options);
-    let action = &cursor.progress_by(0.5);
-    assert_action_eq(&make_dash(0.5, 0.0), action);
-}
+    fn make_gap(length: f32, remaining_distance: f32) -> DashAction {
+        DashAction {
+            length: length,
+            remaining_distance: remaining_distance,
+            dash_action_type: DashActionType::Gap,
+        }
+    }
 
-#[test]
-fn test_segment_cross() {
-    let options = DashOptions::new(0.0, vec![1.0, 2.0]);
-    let mut cursor = DashCursor::new(&options);
-    let action = cursor.progress_by(1.5);
-    assert_action_eq(&make_dash(1.0, 0.5), &action);
-    let action = cursor.progress_by(action.remaining_distance);
-    assert_action_eq(&make_gap(0.5, 0.0), &action);
+    #[test]
+    fn test_no_segment_cross() {
+        let options = DashOptions::new(0.0, vec![1.0, 2.0]);
+        let mut cursor = DashCursor::new(&options);
+        let action = &cursor.progress_by(0.5);
+        assert_action_eq(&make_dash(0.5, 0.0), action);
+    }
+
+    #[test]
+    fn test_segment_cross() {
+        let options = DashOptions::new(0.0, vec![1.0, 2.0]);
+        let mut cursor = DashCursor::new(&options);
+        let action = cursor.progress_by(1.5);
+        assert_action_eq(&make_dash(1.0, 0.5), &action);
+        let action = cursor.progress_by(action.remaining_distance);
+        assert_action_eq(&make_gap(0.5, 0.0), &action);
+    }
 }
 
 #[derive(Debug)]
@@ -340,9 +348,15 @@ fn main() {
     builder.line_to(point(10.0, 10.0));
     builder.line_to(point(20.0, 10.0));
     builder.line_to(point(20.0, 1.5));
-    // TODO test skipping of line segment
-    // TODO some kind of move_to?
     builder.close();
+    // TODO test skipping of line segment
+    // builder.add_rectangle(
+    //     &lyon::math::Rect {
+    //         origin: point(100.0, 0.0),
+    //         size: lyon::math::Size::new(10.0, 10.0),
+    //     },
+    //     Winding::Positive,
+    // );
     let path = builder.build();
 
     // expected segments:
